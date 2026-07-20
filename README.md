@@ -1,2 +1,61 @@
-# CFPass
-零知识架构密码管理器，运行在 Cloudflare Workers 上。所有加解密在浏览器本地完成，数据库只存密文，服务器无法解密用户数据
+# PWDM
+
+零知识加密密码管理器，运行在 Cloudflare Workers 上。
+
+## 特性
+
+- **零知识架构** — 所有加解密在浏览器本地完成，数据库只存密文，服务器无法解密用户数据
+- **纯主密码模式** — 无需用户名/邮箱，只需一个主密码即可解锁
+- **单文件部署** — 一个 `worker.js` 包含后端路由 + 内嵌原生前端，直接粘贴到 CF 控制台即可运行
+- **密码生成器** — 内置可自定义规则的密码生成器（支持大写/小写/数字/特殊字符/自定义字符）
+- **CSV 导入导出** — 兼容 KeePass 格式（titel,website,name,passwd,email,note），支持 UTF-8/GBK/UTF-16 编码自动识别
+- **实时导入** — 导入过程中每条记录即时显示在列表中
+- **响应式设计** — 适配桌面和移动端
+
+## 技术栈
+
+- **后端**: Cloudflare Workers (JavaScript)
+- **存储**: Cloudflare KV
+- **加密**: AES-256-GCM (Web Crypto API)
+- **密钥派生**: PBKDF2, 200k 迭代, SHA-256
+- **前端**: 原生 HTML/CSS/JS（无框架依赖）
+
+## 部署
+
+1. 登录 [Cloudflare Dashboard](https://dash.cloudflare.com/)
+2. 进入 Workers & Pages → 创建 Worker
+3. 将 `worker.js` 的全部内容粘贴到编辑器中
+4. 创建 KV 命名空间（变量名: `PWD_KV`）
+5. 在 Worker 设置中绑定 KV 变量: `PWD_KV` → 选择上一步创建的命名空间
+6. 部署
+
+## 密码字段
+
+| 字段 | 存储方式 |
+|------|----------|
+| 标题 | 明文（用于搜索和列表显示） |
+| 网址 | 加密 |
+| 用户名 | 加密 |
+| 密码 | 加密 |
+| 邮箱 | 加密 |
+| 备注 | 加密 |
+
+## 加密细节
+
+- 主密码通过 PBKDF2 派生密钥（200k 迭代, SHA-256, 固定盐 `PWDM-SALT-v1`）
+- 数据使用 AES-256-GCM 加密，每次加密使用随机 IV
+- 所有字段打包成 JSON 对象后整体加密，存储在 `encryptedData` 字录中
+- 主密码哈希（SHA-256）存于 KV 用于登录验证
+
+## 项目结构
+
+```
+PWDM/
+├── worker.js      # 唯一需要的文件，包含后端 + 前端
+├── README.md
+└── .gitignore
+```
+
+## License
+
+MIT
