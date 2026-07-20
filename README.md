@@ -55,8 +55,5 @@ FBI warning
 PWDM/
 ├── worker.js      # 唯一需要的文件，包含后端 + 前端
 
-```
 
-## License
 
-MIT
