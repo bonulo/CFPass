@@ -1,4 +1,4 @@
-# PWDM
+# CFPASS
 
 零知识加密密码管理器，运行在 Cloudflare Workers 上。
 
