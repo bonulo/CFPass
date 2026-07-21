@@ -6,6 +6,10 @@ export default {
     const corsHeaders = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Authorization' };
     if (method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
     try {
+      if (path === '/api/check' && method === 'GET') {
+        const hasMaster = await env.PWD_KV.get('master');
+        return j({ registered: !!hasMaster, hashPrefix: hasMaster ? hasMaster.substring(0, 8) + '...' : null }, 200, corsHeaders);
+      }
       if (path === '/' && method === 'GET') return new Response(HTML, { headers: { 'Content-Type': 'text/html;charset=utf-8', ...corsHeaders } });
       if (path === '/app.js' && method === 'GET') return new Response(CLIENT_JS, { headers: { 'Content-Type': 'application/javascript;charset=utf-8', ...corsHeaders } });
       if (path === '/api/register' && method === 'POST') return handleRegister(request, env, corsHeaders);
@@ -15,12 +19,20 @@ export default {
       if (path.match(/^\/api\/passwords\/[\w-]+$/) && method === 'PUT') return handleUpdatePassword(request, env, corsHeaders);
       if (path.match(/^\/api\/passwords\/[\w-]+$/) && method === 'DELETE') return handleDeletePassword(request, env, corsHeaders);
       return new Response('Not Found', { status: 404, headers: corsHeaders });
-    } catch (e) { return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders } }); }
+    } catch (e) {
+      return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
+    }
   },
 };
 
-function generateToken() { return crypto.randomUUID(); }
-function hashMaster(pw) { return crypto.subtle.digest('SHA-256', new TextEncoder().encode(pw)); }
+function generateToken() {
+  return crypto.randomUUID();
+}
+
+function hashMaster(pw) {
+  return crypto.subtle.digest('SHA-256', new TextEncoder().encode(pw));
+}
+
 async function verifyAuth(request, env) {
   const auth = request.headers.get('Authorization');
   if (!auth || !auth.startsWith('Bearer ')) return null;
@@ -54,7 +66,10 @@ async function handleListPasswords(request, env, ch) {
   if (!await verifyAuth(request, env)) return j({ error: 'Unauthorized' }, 401, ch);
   const list = await env.PWD_KV.list({ prefix: 'pwd:' });
   const items = [];
-  for (const key of list.keys) { const v = await env.PWD_KV.get(key.name); if (v) items.push(JSON.parse(v)); }
+  for (const key of list.keys) {
+    const v = await env.PWD_KV.get(key.name);
+    if (v) items.push(JSON.parse(v));
+  }
   return j(items, 200, ch);
 }
 
@@ -100,7 +115,7 @@ const HTML = `<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PWDM</title>
+<title>CFPASS</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:-apple-system,'Segoe UI',system-ui,sans-serif;background:#f0f2f5;color:#303133;min-height:100vh}
@@ -153,13 +168,31 @@ body{font-family:-apple-system,'Segoe UI',system-ui,sans-serif;background:#f0f2f
 .empty{text-align:center;padding:60px 0;color:#909399}.empty p{font-size:14px;margin-top:12px}
 .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);padding:12px 20px;background:#fff;border:1px solid #dcdfe6;border-radius:6px;font-size:13px;z-index:200;opacity:0;transition:opacity .3s;pointer-events:none;box-shadow:0 2px 12px rgba(0,0,0,.1)}
 .toast.show{opacity:1}.toast.err{border-color:#f56c6c;color:#f56c6c}
-@media(max-width:900px){.pwd-header{display:none}.pwd-row{grid-template-columns:1fr auto;gap:4px;padding:10px 12px}.pwd-row .c-cell:nth-child(n+3),.pwd-row .c-pw,.pwd-row .c-acts{display:none}.form-grid{grid-template-columns:1fr}.form-grid .full{grid-column:1}.wrap{padding:16px 12px}}
+.modal-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.5);z-index:300;align-items:flex-end;justify-content:center}
+.modal-overlay.show{display:flex}
+.modal{background:#fff;width:100%;max-width:500px;border-radius:16px 16px 0 0;padding:20px;max-height:80vh;overflow-y:auto;animation:slideUp .25s ease}
+@keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
+.modal h3{font-size:18px;font-weight:700;color:#303133;margin-bottom:16px;padding-right:30px}
+.modal-close{position:absolute;top:16px;right:16px;background:none;border:none;font-size:24px;color:#909399;cursor:pointer;padding:4px 8px}
+.modal-field{margin-bottom:14px}
+.modal-field .label{font-size:11px;font-weight:600;color:#909399;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
+.modal-field .value{font-size:14px;color:#303133;word-break:break-all;display:flex;align-items:center;gap:8px}
+.modal-field .value a{color:#409eff;text-decoration:none}
+.modal-field .value .copy-btn{background:none;border:none;color:#c0c4cc;cursor:pointer;padding:2px;flex-shrink:0}
+.modal-field .value .copy-btn:hover{color:#409eff}
+.modal-pw{display:flex;align-items:center;gap:6px}
+.modal-pw span{font-family:monospace;font-size:14px;color:#303133}
+.modal-pw button{background:#f5f7fa;border:none;color:#909399;padding:4px 8px;border-radius:4px;font-size:12px;cursor:pointer}
+.modal-pw button:hover{color:#409eff;background:#ecf5ff}
+.modal-actions{display:flex;gap:8px;margin-top:16px;padding-top:16px;border-top:1px solid #ebeef5}
+.modal-actions .btn{flex:1}
+@media(max-width:900px){.pwd-header{display:none}.pwd-row{grid-template-columns:1fr auto;gap:4px;padding:10px 12px;cursor:pointer}.pwd-row .c-cell:nth-child(n+3),.pwd-row .c-pw,.pwd-row .c-acts{display:none}.form-grid{grid-template-columns:1fr}.form-grid .full{grid-column:1}.wrap{padding:16px 12px}.hdr{flex-direction:column;align-items:flex-start;gap:12px}.row{flex-wrap:wrap;width:100%}.btn-s,.btn-i{font-size:13px;padding:8px 12px}}
 </style>
 </head>
 <body>
 <div class="auth" id="authScr">
 <div class="auth-box">
-<h1>PWDM</h1>
+<h1>CFPASS</h1>
 <p class="sub">\u96f6\u77e5\u8bc6\u52a0\u5bc6\u5bc6\u7801\u7ba1\u7406\u5668</p>
 <div class="field"><label>\u4e3b\u5bc6\u7801</label><input type="password" id="mpInput" placeholder="\u8bf7\u8f93\u5165\u4e3b\u5bc6\u7801" autocomplete="off"></div>
 <button class="btn btn-p" style="width:100%;padding:14px" onclick="doAuth()">\u89e3\u9501</button>
@@ -168,7 +201,7 @@ body{font-family:-apple-system,'Segoe UI',system-ui,sans-serif;background:#f0f2f
 <div class="main" id="mainScr">
 <div class="wrap">
 <div class="hdr">
-<h2>PWDM</h2>
+<h2>CFPASS</h2>
 <div class="row">
 <button class="btn btn-s" onclick="toggleAdd()">+ \u6dfb\u52a0\u5bc6\u7801</button>
 <button class="btn btn-s" onclick="exportCSV()">\u5bfc\u51fa</button>
@@ -196,11 +229,23 @@ body{font-family:-apple-system,'Segoe UI',system-ui,sans-serif;background:#f0f2f
 </div>
 </div>
 <div class="toast" id="toast"></div>
+<div class="modal-overlay" id="modalOverlay" onclick="if(event.target===this)closeModal()">
+<div class="modal" style="position:relative">
+<button class="modal-close" onclick="closeModal()">&times;</button>
+<h3 id="modalTitle"></h3>
+<div class="modal-field"><div class="label">\u7f51\u5740</div><div class="value" id="modalUrl"></div></div>
+<div class="modal-field"><div class="label">\u7528\u6237\u540d</div><div class="value" id="modalUser"></div></div>
+<div class="modal-field"><div class="label">\u5bc6\u7801</div><div class="value modal-pw"><span id="modalPw">\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022</span><button onclick="toggleModalPw()">\u663e\u793a</button><button onclick="copyModalPw()">\u590d\u5236</button></div></div>
+<div class="modal-field"><div class="label">\u90ae\u7bb1</div><div class="value" id="modalEmail"></div></div>
+<div class="modal-field"><div class="label">\u5907\u6ce8</div><div class="value" id="modalNotes"></div></div>
+<div class="modal-actions"><button class="btn btn-s" onclick="editFromModal()">\u7f16\u8f91</button><button class="btn btn-d" onclick="delFromModal()">\u5220\u9664</button></div>
+</div>
+</div>
 <script src="/app.js"></script>
 </body>
 </html>`;
 
-// ─── Client JS (template literal - no single-quote escaping issues) ───
+// ─── Client JS ───
 const CLIENT_JS = `
 var token=localStorage.getItem("pw_token");
 var masterKey=null;
@@ -275,7 +320,7 @@ function renderList(){
   var rows="";
   for(var i=0;i<filtered.length;i++){
     var e=filtered[i];var url=e.url||"";var pw=e.password||"";
-    rows+='<div class="pwd-row">';
+    rows+='<div class="pwd-row" onclick="openModal(\\''+e.id+'\\')">';
     rows+='<div class="c-cell"><span title="'+esc(e.title)+'">'+esc(e.title||"\\u2014")+'</span>'+cpB(e.title)+'</div>';
     rows+='<div class="c-cell c-url">'+(url?'<a href="'+esc(url)+'" target="_blank" title="'+esc(url)+'">'+esc(url)+'</a>'+cpB(url):"\\u2014")+'</div>';
     rows+='<div class="c-cell"><span title="'+esc(e.username)+'">'+esc(e.username||"\\u2014")+'</span>'+cpB(e.username)+'</div>';
@@ -435,4 +480,29 @@ function parseCSVLine(line){
 }
 
 document.getElementById("mpInput").addEventListener("keydown",function(e){if(e.key==="Enter")doAuth()});
+
+var modalEntry=null;var modalPwShown=false;
+function openModal(id){
+  var e=entries.find(function(x){return x.id===id});if(!e)return;
+  modalEntry=e;modalPwShown=false;
+  document.getElementById("modalTitle").textContent=e.title||"\\u2014";
+  document.getElementById("modalUrl").innerHTML=e.url?'<a href="'+esc(e.url)+'" target="_blank">'+esc(e.url)+'</a>'+cpBtn(e.url):'<span style="color:#909399">\\u2014</span>';
+  document.getElementById("modalUser").innerHTML=(e.username?esc(e.username)+' '+cpBtn(e.username):'<span style="color:#909399">\\u2014</span>');
+  document.getElementById("modalPw").textContent="\\u2022\\u2022\\u2022\\u2022\\u2022\\u2022\\u2022\\u2022";
+  document.getElementById("modalEmail").innerHTML=(e.email?esc(e.email)+' '+cpBtn(e.email):'<span style="color:#909399">\\u2014</span>');
+  document.getElementById("modalNotes").innerHTML=(e.notes?esc(e.notes)+' '+cpBtn(e.notes):'<span style="color:#909399">\\u2014</span>');
+  document.getElementById("modalOverlay").classList.add("show");
+}
+function closeModal(){document.getElementById("modalOverlay").classList.remove("show");modalEntry=null}
+function toggleModalPw(){
+  if(!modalEntry)return;
+  var el=document.getElementById("modalPw");
+  modalPwShown=!modalPwShown;
+  el.textContent=modalPwShown?(modalEntry.password||"(\\u7a7a)"):"\\u2022\\u2022\\u2022\\u2022\\u2022\\u2022\\u2022\\u2022";
+  el.nextElementSibling.textContent=modalPwShown?"\\u9690\\u85cf":"\\u663e\\u793a";
+}
+function copyModalPw(){if(modalEntry&&modalEntry.password){navigator.clipboard.writeText(modalEntry.password);toast("\\u5df2\\u590d\\u5236")}}
+function editFromModal(){if(modalEntry){closeModal();editEntry(modalEntry.id)}}
+async function delFromModal(){if(!modalEntry)return;if(!confirm("\\u786e\\u5b9a\\u5220\\u9664?"))return;var id=modalEntry.id;closeModal();var r=await api("/api/passwords/"+id,{method:"DELETE"});if(r.ok){await loadEntries();toast("\\u5df2\\u5220\\u9664")}}
+function cpBtn(v){if(!v)return"";return '<button class="copy-btn" onclick="navigator.clipboard.writeText(this.getAttribute(\\"data-v\\"));toast(\\"\\u5df2\\u590d\\u5236\\")" data-v="'+esc(v).replace(/"/g,"&quot;")+'" title="\\u590d\\u5236"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button>'}
 `;
